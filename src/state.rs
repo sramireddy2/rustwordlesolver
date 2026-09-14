@@ -53,10 +53,13 @@ impl CandidateSet {
         self.count == 0
     }
 
+    /// Strategies ask this about *every* allowed guess, most of which are
+    /// not answers and so lie past the end of the bitset. Those are simply
+    /// not candidates; they must not index out of bounds.
     #[inline]
     pub fn contains(&self, id: WordId) -> bool {
         let i = id.index();
-        self.bits[i / 64] >> (i % 64) & 1 == 1
+        i < MAX_ANSWERS && self.bits[i / 64] >> (i % 64) & 1 == 1
     }
 
     pub fn insert(&mut self, id: WordId) {
@@ -209,6 +212,14 @@ mod tests {
                 assert!(!s.contains(WordId(n as u16)));
             }
         }
+    }
+
+    #[test]
+    fn contains_is_false_past_the_answer_range() {
+        let s = CandidateSet::all(MAX_ANSWERS);
+        assert!(s.contains(WordId(MAX_ANSWERS as u16 - 1)));
+        assert!(!s.contains(WordId(MAX_ANSWERS as u16)));
+        assert!(!s.contains(WordId(u16::MAX)));
     }
 
     #[test]

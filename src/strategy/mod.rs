@@ -10,6 +10,10 @@
 //! function of those bucket sizes: [`entropy`] measures how evenly `g` splits
 //! them on average, [`worst_case`] is the size of the biggest one.
 
+pub mod entropy;
+pub mod hybrid;
+pub mod minimax;
+
 use std::cmp::Ordering;
 use std::sync::OnceLock;
 
@@ -25,6 +29,27 @@ pub trait Strategy: Sync {
 
     /// The next word to play. `candidates` is never empty when this is called.
     fn best_guess(&self, ctx: &Context, candidates: &CandidateSet) -> WordId;
+}
+
+/// Every built-in strategy, in the order the reports print them.
+pub fn all() -> Vec<Box<dyn Strategy>> {
+    vec![
+        Box::new(entropy::Entropy),
+        Box::new(minimax::Minimax),
+        Box::new(hybrid::Hybrid),
+    ]
+}
+
+/// Look a strategy up by its [`Strategy::name`], for CLI flags.
+pub fn by_name(name: &str) -> Option<Box<dyn Strategy>> {
+    all().into_iter().find(|s| s.name() == name)
+}
+
+/// The candidate set as a dense list. Strategies build this once per
+/// decision so the 13k histogram passes loop a contiguous slice instead of
+/// walking bitset words.
+pub fn candidate_list(candidates: &CandidateSet) -> Vec<WordId> {
+    candidates.iter().collect()
 }
 
 /// Bucket counts indexed by [`Pattern`]. 486 bytes, lives on the stack.
