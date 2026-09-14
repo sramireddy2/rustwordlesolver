@@ -3,7 +3,7 @@
 
 use std::sync::OnceLock;
 
-use wordlesolver::strategy::{self, entropy, histogram};
+use wordlesolver::strategy::{self, WORDLE_TURNS, entropy, histogram};
 use wordlesolver::words::{BUNDLED_ANSWERS, parse_list};
 use wordlesolver::{CandidateSet, Context, Solver};
 
@@ -57,8 +57,8 @@ fn openers_are_strong_and_stable() {
     let all = CandidateSet::all(ctx.num_answers());
     let cands = strategy::candidate_list(&all);
     for strategy in strategy::all() {
-        let opener = strategy.best_guess(ctx, &all);
-        let again = strategy.best_guess(ctx, &all);
+        let opener = strategy.best_guess(ctx, &all, WORDLE_TURNS);
+        let again = strategy.best_guess(ctx, &all, WORDLE_TURNS);
         assert_eq!(
             opener,
             again,
@@ -118,7 +118,7 @@ fn open_mode_solves_a_sample_of_real_answers() {
     let strategy = strategy::by_name("hybrid").unwrap();
     let solver = Solver::new(ctx, strategy.as_ref());
     let all = CandidateSet::all(ctx.num_answers());
-    let opener = solver.next_guess(&all);
+    let opener = solver.next_guess(&all, WORDLE_TURNS);
     eprintln!("open mode hybrid opens with {}", ctx.word_str(opener));
 
     let mut total = 0;

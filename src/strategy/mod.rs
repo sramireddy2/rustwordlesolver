@@ -24,12 +24,17 @@ use crate::state::CandidateSet;
 use crate::table::{Context, MathTables};
 use crate::types::{NUM_PATTERNS, Pattern, WordId};
 
+/// Guesses a game allows.
+pub const WORDLE_TURNS: usize = 6;
+
 pub trait Strategy: Sync {
     /// Short identifier, for CLI flags and report tables.
     fn name(&self) -> &'static str;
 
-    /// The next word to play. `candidates` is never empty when this is called.
-    fn best_guess(&self, ctx: &Context, candidates: &CandidateSet) -> WordId;
+    /// The next word to play. `candidates` is never empty when this is
+    /// called, and `turns_left` (counting this one) is at least 2 — the
+    /// [`Solver`] handles the last turn itself.
+    fn best_guess(&self, ctx: &Context, candidates: &CandidateSet, turns_left: usize) -> WordId;
 }
 
 /// Every built-in strategy, in the order the reports print them.
@@ -145,11 +150,11 @@ where
 /// cannot loop forever.
 pub const MAX_TURNS: usize = 10;
 
-/// Drives a [`Strategy`] through a game, adding the two things that are rules
+/// Drives a [`Strategy`] through a game, adding the things that are rules
 /// of the game rather than strategy: play the likeliest candidate outright
-/// when at most two remain (there is nothing left to learn), and remember
-/// the opening guess, which is identical for every game and dominates batch
-/// runs.
+/// when at most two remain (there is nothing left to learn) or on the last
+/// turn (anything else is a certain loss), and remember the opening guess,
+/// which is identical for every game and dominates batch runs.
 pub struct Solver<'a> {
     ctx: &'a Context,
     strategy: &'a dyn Strategy,
@@ -169,20 +174,21 @@ impl<'a> Solver<'a> {
         self.strategy
     }
 
-    pub fn next_guess(&self, candidates: &CandidateSet) -> WordId {
+    /// `turns_left` counts the guess about to be played; 6 at the start.
+    pub fn next_guess(&self, candidates: &CandidateSet, turns_left: usize) -> WordId {
         assert!(
             !candidates.is_empty(),
             "no candidates left; the feedback was contradictory"
         );
-        if candidates.len() <= 2 {
+        if candidates.len() <= 2 || turns_left <= 1 {
             return self.ctx.most_likely(candidates).unwrap();
         }
         if candidates.len() == self.ctx.num_answers() {
             return *self
                 .opener
-                .get_or_init(|| self.strategy.best_guess(self.ctx, candidates));
+                .get_or_init(|| self.strategy.best_guess(self.ctx, candidates, turns_left));
         }
-        self.strategy.best_guess(self.ctx, candidates)
+        self.strategy.best_guess(self.ctx, candidates, turns_left)
     }
 
     /// Play a full game against a known answer, using the table as the
@@ -192,7 +198,10 @@ impl<'a> Solver<'a> {
         let mut candidates = CandidateSet::all(self.ctx.num_answers());
         let mut played = Vec::with_capacity(6);
         while played.len() < MAX_TURNS {
-            let guess = self.next_guess(&candidates);
+            // Past the cap the game is already lost; keep playing "last
+            // turn" so the count still shows how far off it was.
+            let turns_left = WORDLE_TURNS.saturating_sub(played.len()).max(1);
+            let guess = self.next_guess(&candidates, turns_left);
             played.push(guess);
             let pattern = self.ctx.get_pattern(guess, answer);
             if pattern == Pattern::WIN {
@@ -300,7 +309,7 @@ mod tests {
         fn name(&self) -> &'static str {
             "counting"
         }
-        fn best_guess(&self, _ctx: &Context, c: &CandidateSet) -> WordId {
+        fn best_guess(&self, _ctx: &Context, c: &CandidateSet, _turns_left: usize) -> WordId {
             self.0.fetch_add(1, AtomicOrdering::SeqCst);
             c.first().unwrap()
         }
@@ -313,18 +322,30 @@ mod tests {
         let solver = Solver::new(&ctx, &strategy);
         let everything = CandidateSet::all(ctx.num_answers());
 
-        assert_eq!(solver.next_guess(&everything), WordId(0));
-        assert_eq!(solver.next_guess(&everything), WordId(0));
+        assert_eq!(solver.next_guess(&everything, WORDLE_TURNS), WordId(0));
+        assert_eq!(solver.next_guess(&everything, WORDLE_TURNS), WordId(0));
         assert_eq!(
             strategy.0.load(AtomicOrdering::SeqCst),
             1,
             "opener computed once"
         );
 
+        // Last turn: the strategy is not consulted, whatever the count.
+        let mut three = CandidateSet::empty();
+        three.insert(WordId(1));
+        three.insert(WordId(2));
+        three.insert(WordId(3));
+        assert_eq!(solver.next_guess(&three, 1), WordId(1));
+        assert_eq!(
+            strategy.0.load(AtomicOrdering::SeqCst),
+            1,
+            "last turn bypasses the strategy"
+        );
+
         let mut two = CandidateSet::empty();
         two.insert(WordId(2));
         two.insert(WordId(3));
-        assert_eq!(solver.next_guess(&two), WordId(2), "uniform: lower id");
+        assert_eq!(solver.next_guess(&two, 5), WordId(2), "uniform: lower id");
         assert_eq!(
             strategy.0.load(AtomicOrdering::SeqCst),
             1,

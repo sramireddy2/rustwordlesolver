@@ -10,11 +10,10 @@ use std::io::{self, BufRead, Write};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use wordlesolver::strategy::{self, Strategy};
+use wordlesolver::strategy::{self, Strategy, WORDLE_TURNS};
 use wordlesolver::words::parse_word;
 use wordlesolver::{Context, Game, Pattern, Solver, WordId};
 
-const TURNS: usize = 6;
 /// Show the remaining candidates once the list is short enough to read.
 const SHOW_CANDIDATES_AT: usize = 10;
 
@@ -111,7 +110,7 @@ fn main() -> ExitCode {
     let stdin = io::stdin();
     let mut lines = stdin.lock().lines();
 
-    while game.turn() <= TURNS {
+    while game.turn() <= WORDLE_TURNS {
         let cands = game.candidates();
         if cands.is_empty() {
             println!("No answers are consistent with those tiles.");
@@ -119,7 +118,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
 
-        let suggested = solver.next_guess(cands);
+        let suggested = solver.next_guess(cands, WORDLE_TURNS + 1 - game.turn());
         println!(
             "Turn {}: play {}   ({} candidate{})",
             game.turn(),

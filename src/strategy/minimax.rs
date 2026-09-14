@@ -21,7 +21,7 @@ impl Strategy for Minimax {
         "minimax"
     }
 
-    fn best_guess(&self, ctx: &Context, candidates: &CandidateSet) -> WordId {
+    fn best_guess(&self, ctx: &Context, candidates: &CandidateSet, _turns_left: usize) -> WordId {
         let cands = candidate_list(candidates);
         // Tuples compare left to right: smaller worst case first (Reverse
         // makes "smaller" win a max), then `true` beats `false` so a possible
@@ -46,7 +46,7 @@ mod tests {
         // Answers share a lot of letters; "clamp" separates every one of
         // them while each answer scores its twin identically to itself.
         let ctx = Context::new(w(&["match", "patch", "latch", "hatch"]), w(&["clamp"])).unwrap();
-        let best = Minimax.best_guess(&ctx, &CandidateSet::all(4));
+        let best = Minimax.best_guess(&ctx, &CandidateSet::all(4), 6);
         assert_eq!(ctx.word_str(best), "clamp");
     }
 }

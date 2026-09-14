@@ -19,7 +19,7 @@ impl Strategy for Hybrid {
         "hybrid"
     }
 
-    fn best_guess(&self, ctx: &Context, candidates: &CandidateSet) -> WordId {
+    fn best_guess(&self, ctx: &Context, candidates: &CandidateSet, _turns_left: usize) -> WordId {
         let cands = candidate_list(candidates);
         let mass = ctx.mass(&cands);
         pick_best(ctx, |g| {
@@ -47,10 +47,10 @@ mod tests {
         .unwrap();
         let mut cands = CandidateSet::all(5);
         cands.remove(ctx.find(b"soare").unwrap());
-        let best = Hybrid.best_guess(&ctx, &cands);
+        let best = Hybrid.best_guess(&ctx, &cands, 6);
         assert_eq!(ctx.word_str(best), "crane");
         // Entropy alone would have taken the lower id.
-        let best = super::super::entropy::Entropy.best_guess(&ctx, &cands);
+        let best = super::super::entropy::Entropy.best_guess(&ctx, &cands, 6);
         assert_eq!(ctx.word_str(best), "soare");
     }
 }

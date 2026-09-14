@@ -63,19 +63,25 @@ against the real 2,315 answers.
 | curated | — | hybrid | 3.463 | 1 | 0 |
 | open | uniform | hybrid | 3.852 | 17 | 0 |
 | open | frequency | hybrid | 3.789 | 4 | 0 |
-| open | frequency | lookahead | **3.637** | 17 | **2** |
+| open | frequency | lookahead | **3.640** | 21 | 0 |
 
 Knowing the list is worth ~0.4 guesses; the prior recovers a sixth of that
 for hybrid and, combined with lookahead, half of it. The prior puts 48.9%
 of its mass on the real answers — they weigh about as much as the other
 10,657 words together.
 
-Two caveats. The prior's centre and width were read off the answer list
-the benchmark uses (two parameters on a smooth curve, so mild, but real
-leakage). And lookahead fails `vaunt` and `woozy` in open mode: it
-minimises *expected* guesses under the prior, and will spend a seventh
-guess on a weight-1 word to save fractions on common ones. The objective
-does not know about Wordle's six-guess cap yet.
+Lookahead's objective is a pair, `(probability of failing, expected
+guesses)`, compared in that order, so it never trades a loss for speed and
+there is no penalty constant to tune. Without the first component it
+scored 3.637 but lost `vaunt` and `woozy` in seven — under the prior those
+weigh 1 in 875,532, and sacrificing them to save fractions on common words
+is exactly what plain expected-guess minimisation should do. The cap costs
+0.003 guesses. `Solver` also plays the likeliest candidate on the last
+turn whatever the strategy says, since anything else is a certain loss.
+
+One caveat remains: the prior's centre and width were read off the answer
+list the benchmark uses (two parameters on a smooth curve, so mild, but
+real leakage).
 
 ## Test
 
@@ -106,8 +112,9 @@ Everything reduces to small integers:
   expected information (`log2 n − Σ c·log2 c / n`, via a lookup table so the
   loop has no logarithms); minimax minimises the largest bucket; hybrid does
   entropy with minimax as the tie-breaker and prefers a guess that could be
-  the answer when everything else is equal; lookahead switches to exact
-  expected-guesses search once few candidates remain. Scoring runs across
+  the answer when everything else is equal; lookahead switches to an exact
+  search once few candidates remain, minimising failure probability first
+  and expected guesses second within the six-guess cap. Scoring runs across
   all cores with `rayon`; ties break to the lower `WordId` so results are
   reproducible.
 

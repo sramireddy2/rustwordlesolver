@@ -16,7 +16,7 @@ impl Strategy for Entropy {
         "entropy"
     }
 
-    fn best_guess(&self, ctx: &Context, candidates: &CandidateSet) -> WordId {
+    fn best_guess(&self, ctx: &Context, candidates: &CandidateSet, _turns_left: usize) -> WordId {
         let cands = candidate_list(candidates);
         let mass = ctx.mass(&cands);
         pick_best(ctx, |g| {
@@ -40,7 +40,7 @@ mod tests {
             w(&["puppy", "soare"]),
         )
         .unwrap();
-        let best = Entropy.best_guess(&ctx, &CandidateSet::all(4));
+        let best = Entropy.best_guess(&ctx, &CandidateSet::all(4), 6);
         assert_eq!(ctx.word_str(best), "crane");
     }
 }
