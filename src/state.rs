@@ -21,7 +21,10 @@ pub struct CandidateSet {
 impl CandidateSet {
     /// Every answer `0..n` is a candidate.
     pub fn all(n: usize) -> CandidateSet {
-        assert!(n <= MAX_ANSWERS, "{n} answers exceed MAX_ANSWERS = {MAX_ANSWERS}");
+        assert!(
+            n <= MAX_ANSWERS,
+            "{n} answers exceed MAX_ANSWERS = {MAX_ANSWERS}"
+        );
         let mut bits = [0u64; BITSET_WORDS];
         let (full, rem) = (n / 64, n % 64);
         for b in &mut bits[..full] {
@@ -34,7 +37,10 @@ impl CandidateSet {
     }
 
     pub fn empty() -> CandidateSet {
-        CandidateSet { bits: [0; BITSET_WORDS], count: 0 }
+        CandidateSet {
+            bits: [0; BITSET_WORDS],
+            count: 0,
+        }
     }
 
     #[inline]
@@ -95,7 +101,11 @@ impl CandidateSet {
 
     /// Set bits in ascending order.
     pub fn iter(&self) -> Iter<'_> {
-        Iter { bits: &self.bits, word: 0, current: self.bits[0] }
+        Iter {
+            bits: &self.bits,
+            word: 0,
+            current: self.bits[0],
+        }
     }
 
     pub fn first(&self) -> Option<WordId> {
@@ -144,7 +154,11 @@ pub struct Game<'a> {
 
 impl<'a> Game<'a> {
     pub fn new(ctx: &'a Context) -> Game<'a> {
-        Game { ctx, candidates: CandidateSet::all(ctx.num_answers()), history: Vec::new() }
+        Game {
+            ctx,
+            candidates: CandidateSet::all(ctx.num_answers()),
+            history: Vec::new(),
+        }
     }
 
     pub fn candidates(&self) -> &CandidateSet {
@@ -177,7 +191,11 @@ mod tests {
 
     fn ctx() -> Context {
         let w = |l: &[&str]| l.iter().map(|s| parse_word(s).unwrap()).collect();
-        Context::new(w(&["crane", "shale", "stone", "adobe", "abbey"]), w(&["soare", "puppy"])).unwrap()
+        Context::new(
+            w(&["crane", "shale", "stone", "adobe", "abbey"]),
+            w(&["soare", "puppy"]),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -228,10 +246,18 @@ mod tests {
             for g in 0..ctx.num_guesses() as u16 {
                 let g = WordId(g);
                 game.observe(g, ctx.get_pattern(g, answer));
-                assert!(game.candidates().contains(answer), "{} eliminated", ctx.word_str(answer));
+                assert!(
+                    game.candidates().contains(answer),
+                    "{} eliminated",
+                    ctx.word_str(answer)
+                );
             }
             assert_eq!(game.candidates().len(), 1);
-            assert!(game.history().iter().any(|&(g, p)| g == answer && p == Pattern::WIN));
+            assert!(
+                game.history()
+                    .iter()
+                    .any(|&(g, p)| g == answer && p == Pattern::WIN)
+            );
             assert_eq!(game.turn(), ctx.num_guesses() + 1);
         }
     }

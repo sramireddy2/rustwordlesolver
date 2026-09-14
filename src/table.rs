@@ -61,7 +61,12 @@ impl Context {
         let math = MathTables::new(num_answers);
         let answers = (0..num_answers as u16).map(WordId).collect();
 
-        Ok(Context { allowed_guesses, answers, table, math })
+        Ok(Context {
+            allowed_guesses,
+            answers,
+            table,
+            math,
+        })
     }
 
     pub fn from_lists(answers: &str, extra_guesses: &str) -> Result<Context, String> {
@@ -138,7 +143,13 @@ pub struct MathTables {
 impl MathTables {
     pub fn new(max_count: usize) -> MathTables {
         let x_log2_x = (0..=max_count)
-            .map(|x| if x == 0 { 0.0 } else { (x as f64) * (x as f64).log2() })
+            .map(|x| {
+                if x == 0 {
+                    0.0
+                } else {
+                    (x as f64) * (x as f64).log2()
+                }
+            })
             .collect();
         MathTables { x_log2_x }
     }

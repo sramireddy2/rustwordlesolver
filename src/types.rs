@@ -98,7 +98,10 @@ impl Pattern {
     pub fn parse(s: &str) -> Result<Pattern, String> {
         let s = s.trim();
         if s.len() != WORD_LEN {
-            return Err(format!("pattern must be {WORD_LEN} characters, got {:?}", s));
+            return Err(format!(
+                "pattern must be {WORD_LEN} characters, got {:?}",
+                s
+            ));
         }
         let mut colors = [BLACK; WORD_LEN];
         for (c, ch) in colors.iter_mut().zip(s.bytes()) {

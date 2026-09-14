@@ -21,6 +21,6 @@ pub mod types;
 pub mod words;
 
 pub use state::{CandidateSet, Game};
-pub use strategy::Strategy;
+pub use strategy::{Solver, Strategy};
 pub use table::Context;
 pub use types::{Pattern, Word, WordId};

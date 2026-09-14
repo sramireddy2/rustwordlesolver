@@ -1,0 +1,2 @@
+# Keep the repo LF everywhere; stops Git-on-Windows CRLF warnings on every commit.
+* text=auto eol=lf
