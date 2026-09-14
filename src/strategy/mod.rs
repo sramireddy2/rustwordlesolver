@@ -82,6 +82,22 @@ pub fn entropy(hist: &Histogram, n: usize, math: &MathTables) -> f64 {
     (n as f64).log2() - sum / n as f64
 }
 
+/// [`entropy`] and [`worst_case`] in one pass over the histogram.
+///
+/// Once few candidates remain, the 243-bucket pass costs more than the
+/// histogram itself, so a strategy that wants both numbers should not walk
+/// the buckets twice. Bit-for-bit identical to calling the two separately.
+#[inline]
+pub fn entropy_and_worst(hist: &Histogram, n: usize, math: &MathTables) -> (f64, u16) {
+    let mut sum = 0.0;
+    let mut worst = 0u16;
+    for &c in hist {
+        sum += math.x_log2_x(c as usize);
+        worst = worst.max(c);
+    }
+    ((n as f64).log2() - sum / n as f64, worst)
+}
+
 /// Size of the largest bucket: how many candidates could remain if the tiles
 /// come back as unhelpfully as possible.
 #[inline]
@@ -222,6 +238,18 @@ mod tests {
         let h = histogram(&ctx, crane, &cands);
         assert_eq!(entropy(&h, 4, &ctx.math), 2.0);
         assert_eq!(worst_case(&h), 1);
+    }
+
+    #[test]
+    fn fused_pass_matches_the_separate_reductions() {
+        let ctx = ctx();
+        let cands = all(&ctx);
+        for g in 0..ctx.num_guesses() as u16 {
+            let h = histogram(&ctx, WordId(g), &cands);
+            let (e, w) = entropy_and_worst(&h, cands.len(), &ctx.math);
+            assert_eq!(e, entropy(&h, cands.len(), &ctx.math));
+            assert_eq!(w, worst_case(&h));
+        }
     }
 
     #[test]

@@ -7,7 +7,7 @@
 
 use std::cmp::Reverse;
 
-use super::{Strategy, candidate_list, entropy, histogram, pick_best, worst_case};
+use super::{Strategy, candidate_list, entropy_and_worst, histogram, pick_best};
 use crate::state::CandidateSet;
 use crate::table::Context;
 use crate::types::WordId;
@@ -23,12 +23,8 @@ impl Strategy for Hybrid {
         let cands = candidate_list(candidates);
         let n = cands.len();
         pick_best(ctx, |g| {
-            let hist = histogram(ctx, g, &cands);
-            (
-                entropy(&hist, n, &ctx.math),
-                Reverse(worst_case(&hist)),
-                candidates.contains(g),
-            )
+            let (bits, worst) = entropy_and_worst(&histogram(ctx, g, &cands), n, &ctx.math);
+            (bits, Reverse(worst), candidates.contains(g))
         })
     }
 }
