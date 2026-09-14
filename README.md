@@ -29,9 +29,20 @@ All 2,315 answers, `cargo run --release --bin evaluate`:
 | entropy | 3.526 | 0 | 31 | 1105 | 1111 | 67 | 1 | 0 | soare |
 | minimax | 3.567 | 1 | 53 | 1001 | 1154 | 105 | 1 | 0 | arise |
 | hybrid  | 3.463 | 0 | 44 | 1219 |  988 | 63 | 1 | 0 | soare |
+| lookahead | 3.461 | 0 | 49 | 1218 | 979 | 69 | 0 | 0 | soare |
 
 `soare` is worth 5.886 bits as an opener on this list — the same figure
 3Blue1Brown derived. A full run takes 2–3 s per strategy on a laptop.
+
+`lookahead` is hybrid until 16 candidates remain, then an exact
+branch-and-bound search for the guess minimising expected guesses to
+finish. It is provably optimal from there, never needs a sixth guess, and is
+*faster* than hybrid in the endgame (its bound is O(n) per guess, hybrid's
+reduction is O(243)). Raising the threshold is not worth it: at 24 the
+search takes 200× longer for 0.001 guesses, because the `2 − 1/m` bound is
+only tight when a perfectly separating guess exists, which stops being true
+in the teens. `--strategy lookahead:N` sweeps it if you want to see for
+yourself. The remaining gap to the ~3.42 optimum lives in turns 1–2.
 
 Time the strategies in *separate* runs when comparing speed: three in a row
 in one process heats the CPU and the later ones throttle.
@@ -62,8 +73,10 @@ Everything reduces to small integers:
   expected information (`log2 n − Σ c·log2 c / n`, via a lookup table so the
   loop has no logarithms); minimax minimises the largest bucket; hybrid does
   entropy with minimax as the tie-breaker and prefers a guess that could be
-  the answer when everything else is equal. Scoring runs across all cores
-  with `rayon`; ties break to the lower `WordId` so results are reproducible.
+  the answer when everything else is equal; lookahead switches to exact
+  expected-guesses search once few candidates remain. Scoring runs across
+  all cores with `rayon`; ties break to the lower `WordId` so results are
+  reproducible.
 
 ## Layout
 
@@ -78,7 +91,8 @@ src/
 │   ├── mod.rs       Strategy trait, histogram/entropy/minimax maths, Solver
 │   ├── entropy.rs
 │   ├── minimax.rs
-│   └── hybrid.rs
+│   ├── hybrid.rs
+│   └── lookahead.rs
 └── bin/
     ├── play.rs      interactive REPL
     └── evaluate.rs  batch simulation over every answer
