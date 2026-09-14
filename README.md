@@ -1,6 +1,7 @@
 # wordlesolver
 
-An entropy-driven Wordle solver in Rust.
+An entropy-driven Wordle solver in Rust. Solves every one of the 2,315
+official answers within six guesses, averaging 3.46.
 
 ## Run
 
@@ -10,11 +11,39 @@ cargo run --release --bin evaluate            # play every answer, report averag
 cargo run --release --example table_timing    # how long the 30 MB pattern table takes to build
 ```
 
+`play` prompts with a word; answer with the tiles you got (`g` green, `y`
+yellow, `b` gray), or `<word> <tiles>` if you played something else.
+
+```
+Turn 1: play SOARE   (2315 candidates)
+> bbgyg
+Turn 2: play TRACK   (14 candidates)
+```
+
+## Results
+
+All 2,315 answers, `cargo run --release --bin evaluate`:
+
+| strategy | avg guesses | 1 | 2 | 3 | 4 | 5 | 6 | fail | opener |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| entropy | 3.526 | 0 | 31 | 1105 | 1111 | 67 | 1 | 0 | soare |
+| minimax | 3.567 | 1 | 53 | 1001 | 1154 | 105 | 1 | 0 | arise |
+| hybrid  | 3.463 | 0 | 44 | 1219 |  988 | 63 | 1 | 0 | soare |
+
+`soare` is worth 5.886 bits as an opener on this list — the same figure
+3Blue1Brown derived. A full run takes 2–3 s per strategy on a laptop.
+
+Time the strategies in *separate* runs when comparing speed: three in a row
+in one process heats the CPU and the later ones throttle.
+
 ## Test
 
 ```
 cargo test
 ```
+
+Unit tests use tiny hand-built word lists; `tests/strategies.rs` runs every
+strategy against the real lists on a sample of answers.
 
 ## How it works
 
@@ -24,12 +53,17 @@ Everything reduces to small integers:
   ordered so the 2,315 possible answers come first;
 - the tiles Wordle shows are a **`Pattern(u8)`**, base-3 packed (3⁵ = 243);
 - a 30 MB **table** holds the pattern for every (guess, answer) pair, built once
-  at startup (~100 ms in release), so scoring is a byte load;
+  at startup (~75 ms in release), so scoring is a byte load;
 - the answers still possible are a **`CandidateSet`**: a 37-word `u64` bitset,
   `Copy`, no heap;
-- a **`Strategy`** turns a candidate set into the next guess. Entropy maximises
-  expected information, minimax bounds the worst case, hybrid does entropy with
-  minimax as the tie-breaker.
+- a **`Strategy`** turns a candidate set into the next guess. For each of the
+  12,972 guesses it sorts the candidates into 243 buckets by the tiles that
+  guess would produce, then scores the bucket shape. Entropy maximises
+  expected information (`log2 n − Σ c·log2 c / n`, via a lookup table so the
+  loop has no logarithms); minimax minimises the largest bucket; hybrid does
+  entropy with minimax as the tie-breaker and prefers a guess that could be
+  the answer when everything else is equal. Scoring runs across all cores
+  with `rayon`; ties break to the lower `WordId` so results are reproducible.
 
 ## Layout
 
@@ -41,7 +75,7 @@ src/
 ├── table.rs         Context: dictionaries + pattern table + log tables
 ├── state.rs         CandidateSet bitset, Game history
 ├── strategy/
-│   ├── mod.rs       Strategy trait, shared histogram/entropy/minimax maths, Solver
+│   ├── mod.rs       Strategy trait, histogram/entropy/minimax maths, Solver
 │   ├── entropy.rs
 │   ├── minimax.rs
 │   └── hybrid.rs
@@ -53,7 +87,8 @@ data/
 └── guesses.txt      10,657 extra allowed guesses
 ```
 
-See `PLAN.md` for the step-by-step design.
+`PLAN.md` is the original step-by-step design; the module layout above
+supersedes its file names.
 
 ## Toolchain note
 
