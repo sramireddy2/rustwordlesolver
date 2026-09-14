@@ -18,11 +18,18 @@ const TURNS: usize = 6;
 /// Show the remaining candidates once the list is short enough to read.
 const SHOW_CANDIDATES_AT: usize = 10;
 
-fn parse_args() -> Result<Box<dyn Strategy>, String> {
+struct Args {
+    strategy: Box<dyn Strategy>,
+    open: bool,
+}
+
+fn parse_args() -> Result<Args, String> {
     let mut strategy: Option<Box<dyn Strategy>> = None;
+    let mut open = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--open" => open = true,
             "--strategy" | "-s" => {
                 let name = args.next().ok_or("--strategy needs a name")?;
                 strategy = Some(strategy::by_name(&name).ok_or_else(|| {
@@ -34,10 +41,15 @@ fn parse_args() -> Result<Box<dyn Strategy>, String> {
             other => return Err(format!("unexpected argument {other:?}\n{USAGE}")),
         }
     }
-    Ok(strategy.unwrap_or_else(|| Box::new(strategy::hybrid::Hybrid)))
+    Ok(Args {
+        strategy: strategy.unwrap_or_else(|| Box::new(strategy::hybrid::Hybrid)),
+        open,
+    })
 }
 
-const USAGE: &str = "usage: play [--strategy <name>]";
+const USAGE: &str = "usage: play [--strategy <name>] [--open]
+  --open   don't assume the curated answer list: every allowed word is a
+           candidate, weighted by how common it is";
 
 enum Input {
     Quit,
@@ -64,8 +76,8 @@ fn parse_input(line: &str, suggested: WordId, ctx: &Context) -> Result<Input, St
 }
 
 fn main() -> ExitCode {
-    let strategy = match parse_args() {
-        Ok(s) => s,
+    let Args { strategy, open } = match parse_args() {
+        Ok(a) => a,
         Err(e) => {
             eprintln!("{e}");
             return ExitCode::FAILURE;
@@ -73,10 +85,19 @@ fn main() -> ExitCode {
     };
 
     let t = Instant::now();
-    let ctx = Context::bundled();
+    let ctx = if open {
+        Context::open()
+    } else {
+        Context::curated()
+    };
     println!(
-        "wordlesolver — {} answers, {} allowed guesses, ready in {:.0} ms",
+        "wordlesolver — {} candidates{}, {} allowed guesses, ready in {:.0} ms",
         ctx.num_answers(),
+        if open {
+            " (open: every word, weighted by frequency)"
+        } else {
+            ""
+        },
         ctx.num_guesses(),
         t.elapsed().as_secs_f64() * 1000.0
     );
@@ -107,8 +128,23 @@ fn main() -> ExitCode {
             if cands.len() == 1 { "" } else { "s" }
         );
         if cands.len() <= SHOW_CANDIDATES_AT && cands.len() > 1 {
-            let list: Vec<&str> = cands.iter().map(|id| ctx.word_str(id)).collect();
-            println!("        could be: {}", list.join(" "));
+            let mass = ctx.mass(&strategy::candidate_list(cands)) as f64;
+            let uniform = ctx.total_weight == ctx.num_answers() as u64;
+            let list: Vec<String> = cands
+                .iter()
+                .map(|id| {
+                    if uniform {
+                        ctx.word_str(id).to_string()
+                    } else {
+                        format!(
+                            "{} {:.0}%",
+                            ctx.word_str(id),
+                            ctx.weight(id) as f64 / mass * 100.0
+                        )
+                    }
+                })
+                .collect();
+            println!("        could be: {}", list.join("  "));
         }
 
         let (played, tiles) = loop {

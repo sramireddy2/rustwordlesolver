@@ -18,8 +18,10 @@ impl Strategy for Entropy {
 
     fn best_guess(&self, ctx: &Context, candidates: &CandidateSet) -> WordId {
         let cands = candidate_list(candidates);
-        let n = cands.len();
-        pick_best(ctx, |g| entropy(&histogram(ctx, g, &cands), n, &ctx.math))
+        let mass = ctx.mass(&cands);
+        pick_best(ctx, |g| {
+            entropy(&histogram(ctx, g, &cands), mass, &ctx.math)
+        })
     }
 }
 

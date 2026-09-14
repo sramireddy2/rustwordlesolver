@@ -3,7 +3,7 @@ use wordlesolver::Context;
 
 fn main() {
     let t = Instant::now();
-    let ctx = Context::bundled();
+    let ctx = Context::curated();
     let built = t.elapsed();
     println!(
         "{} answers x {} guesses = {} cells ({:.1} MB) built in {:?}",

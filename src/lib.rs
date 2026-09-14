@@ -14,6 +14,7 @@
 //! [`CandidateSet`]: state::CandidateSet
 //! [`Strategy`]: strategy::Strategy
 
+pub mod prior;
 pub mod state;
 pub mod strategy;
 pub mod table;

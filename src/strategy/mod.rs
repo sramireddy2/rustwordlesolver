@@ -59,8 +59,9 @@ pub fn candidate_list(candidates: &CandidateSet) -> Vec<WordId> {
     candidates.iter().collect()
 }
 
-/// Bucket counts indexed by [`Pattern`]. 486 bytes, lives on the stack.
-pub type Histogram = [u16; NUM_PATTERNS];
+/// Prior weight per bucket, indexed by [`Pattern`]. Under a uniform prior
+/// these are plain counts. 972 bytes, lives on the stack.
+pub type Histogram = [u32; NUM_PATTERNS];
 
 /// Sort `candidates` into buckets by the pattern `guess` would produce
 /// against each. This is the innermost loop of the whole solver: one byte
@@ -70,23 +71,24 @@ pub type Histogram = [u16; NUM_PATTERNS];
 pub fn histogram(ctx: &Context, guess: WordId, candidates: &[WordId]) -> Histogram {
     let n = ctx.num_answers();
     let row = &ctx.table[guess.index() * n..][..n];
-    let mut hist = [0u16; NUM_PATTERNS];
+    let mut hist = [0u32; NUM_PATTERNS];
     for &a in candidates {
-        hist[row[a.index()].index()] += 1;
+        hist[row[a.index()].index()] += ctx.weights[a.index()];
     }
     hist
 }
 
-/// Expected information from a guess, in bits, given `n` candidates.
+/// Expected information from a guess, in bits, given candidates of total
+/// prior weight `mass`.
 ///
-/// `H = log2(n) - (1/n) · Σ_b count_b · log2(count_b)` — the usual
-/// `-Σ p log p` rearranged so the loop is table lookups, not logarithms.
-/// 0 means the guess teaches nothing; `log2(n)` means it identifies the
-/// answer outright.
+/// `H = log2(W) - (1/W) · Σ_b w_b · log2(w_b)` — the usual `-Σ p log p`
+/// rearranged so the loop is table lookups, not logarithms. 0 means the
+/// guess teaches nothing; `log2(W)` means it identifies the answer
+/// outright. With a uniform prior `W` is just the candidate count.
 #[inline]
-pub fn entropy(hist: &Histogram, n: usize, math: &MathTables) -> f64 {
+pub fn entropy(hist: &Histogram, mass: u64, math: &MathTables) -> f64 {
     let sum: f64 = hist.iter().map(|&c| math.x_log2_x(c as usize)).sum();
-    (n as f64).log2() - sum / n as f64
+    (mass as f64).log2() - sum / mass as f64
 }
 
 /// [`entropy`] and [`worst_case`] in one pass over the histogram.
@@ -95,20 +97,20 @@ pub fn entropy(hist: &Histogram, n: usize, math: &MathTables) -> f64 {
 /// histogram itself, so a strategy that wants both numbers should not walk
 /// the buckets twice. Bit-for-bit identical to calling the two separately.
 #[inline]
-pub fn entropy_and_worst(hist: &Histogram, n: usize, math: &MathTables) -> (f64, u16) {
+pub fn entropy_and_worst(hist: &Histogram, mass: u64, math: &MathTables) -> (f64, u32) {
     let mut sum = 0.0;
-    let mut worst = 0u16;
+    let mut worst = 0u32;
     for &c in hist {
         sum += math.x_log2_x(c as usize);
         worst = worst.max(c);
     }
-    ((n as f64).log2() - sum / n as f64, worst)
+    ((mass as f64).log2() - sum / mass as f64, worst)
 }
 
-/// Size of the largest bucket: how many candidates could remain if the tiles
-/// come back as unhelpfully as possible.
+/// Weight of the heaviest bucket: how much probability mass could remain if
+/// the tiles come back as unhelpfully as possible.
 #[inline]
-pub fn worst_case(hist: &Histogram) -> u16 {
+pub fn worst_case(hist: &Histogram) -> u32 {
     *hist.iter().max().expect("histogram is non-empty")
 }
 
@@ -144,9 +146,10 @@ where
 pub const MAX_TURNS: usize = 10;
 
 /// Drives a [`Strategy`] through a game, adding the two things that are rules
-/// of the game rather than strategy: play a candidate outright when at most
-/// two remain (there is nothing left to learn), and remember the opening
-/// guess, which is identical for every game and dominates batch runs.
+/// of the game rather than strategy: play the likeliest candidate outright
+/// when at most two remain (there is nothing left to learn), and remember
+/// the opening guess, which is identical for every game and dominates batch
+/// runs.
 pub struct Solver<'a> {
     ctx: &'a Context,
     strategy: &'a dyn Strategy,
@@ -172,7 +175,7 @@ impl<'a> Solver<'a> {
             "no candidates left; the feedback was contradictory"
         );
         if candidates.len() <= 2 {
-            return candidates.first().unwrap();
+            return self.ctx.most_likely(candidates).unwrap();
         }
         if candidates.len() == self.ctx.num_answers() {
             return *self
@@ -226,6 +229,7 @@ mod tests {
         let crane = ctx.find(b"crane").unwrap();
         let hist = histogram(&ctx, crane, &all(&ctx));
         assert_eq!(hist.iter().map(|&c| c as usize).sum::<usize>(), 4);
+        assert_eq!(ctx.mass(&all(&ctx)), 4);
         assert_eq!(hist[Pattern::WIN.index()], 1);
         // "crane" gives every candidate a different pattern.
         assert_eq!(hist.iter().filter(|&&c| c > 0).count(), 4);
@@ -253,10 +257,29 @@ mod tests {
         let cands = all(&ctx);
         for g in 0..ctx.num_guesses() as u16 {
             let h = histogram(&ctx, WordId(g), &cands);
-            let (e, w) = entropy_and_worst(&h, cands.len(), &ctx.math);
-            assert_eq!(e, entropy(&h, cands.len(), &ctx.math));
+            let (e, w) = entropy_and_worst(&h, ctx.mass(&cands), &ctx.math);
+            assert_eq!(e, entropy(&h, ctx.mass(&cands), &ctx.math));
             assert_eq!(w, worst_case(&h));
         }
+    }
+
+    #[test]
+    fn weighted_entropy_is_the_entropy_of_the_prior_split() {
+        // Answer "crane" three times as likely as "shale". A guess that
+        // separates them is worth H(3/4, 1/4) = 0.811 bits, not 1 bit.
+        let ctx = Context::with_prior(vec![*b"crane", *b"shale"], vec![], |w| {
+            if w == b"crane" { 3 } else { 1 }
+        })
+        .unwrap();
+        let cands = ctx.answers.clone();
+        let mass = ctx.mass(&cands);
+        assert_eq!(mass, 4);
+        let h = histogram(&ctx, WordId(0), &cands);
+        assert_eq!(h[Pattern::WIN.index()], 3);
+        let bits = entropy(&h, mass, &ctx.math);
+        let expected = -(0.75f64 * 0.75f64.log2() + 0.25 * 0.25f64.log2());
+        assert!((bits - expected).abs() < 1e-12, "{bits} vs {expected}");
+        assert_eq!(worst_case(&h), 3);
     }
 
     #[test]
@@ -301,7 +324,7 @@ mod tests {
         let mut two = CandidateSet::empty();
         two.insert(WordId(2));
         two.insert(WordId(3));
-        assert_eq!(solver.next_guess(&two), WordId(2));
+        assert_eq!(solver.next_guess(&two), WordId(2), "uniform: lower id");
         assert_eq!(
             strategy.0.load(AtomicOrdering::SeqCst),
             1,

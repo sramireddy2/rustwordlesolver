@@ -2,12 +2,18 @@
 
 use rayon::prelude::*;
 
-use crate::state::MAX_ANSWERS;
+use crate::prior;
+use crate::state::{CandidateSet, MAX_ANSWERS};
 use crate::types::{Pattern, Word, WordId};
-use crate::words::{self, parse_list, word_str};
+use crate::words::{self, parse_frequencies, parse_list, word_str};
+
+/// Guard on the `x·log2 x` table, which has one entry per unit of weight.
+/// 2^23 entries is 64 MB; the bundled prior sums to about a million.
+pub const MAX_TOTAL_WEIGHT: u64 = 1 << 23;
 
 /// Everything immutable the solver needs: the dictionaries, the pattern
-/// matrix, and the maths lookup tables. Built once, shared by reference.
+/// matrix, the prior, and the maths lookup tables. Built once, shared by
+/// reference.
 pub struct Context {
     /// Every word you may guess. **Answers come first**, so
     /// `allowed_guesses[..answers.len()]` is the answer list and
@@ -16,16 +22,33 @@ pub struct Context {
     /// `answers[i] == WordId(i)`; kept as a list for convenient iteration.
     pub answers: Vec<WordId>,
     /// Flattened `guesses × answers`, row-major:
-    /// `table[guess * answers.len() + answer]`. One byte per cell, ~30 MB for
-    /// the official lists, and the reason scoring is a load and not a call.
+    /// `table[guess * answers.len() + answer]`. One byte per cell — 30 MB
+    /// for the curated lists, 168 MB when every word is a candidate — and
+    /// the reason scoring is a load and not a call.
     pub table: Vec<Pattern>,
+    /// Prior weight per answer id: how likely that word is to be the
+    /// answer, as an integer so histograms stay integer. Uniform = all 1.
+    pub weights: Vec<u32>,
+    /// `weights.iter().sum()`.
+    pub total_weight: u64,
     pub math: MathTables,
 }
 
 impl Context {
-    /// `answers` become ids `0..answers.len()`; any `extra_guesses` that are
-    /// not already answers follow. Duplicates are dropped.
+    /// Uniform prior: every answer equally likely.
     pub fn new(answers: Vec<Word>, extra_guesses: Vec<Word>) -> Result<Context, String> {
+        Context::with_prior(answers, extra_guesses, |_| 1)
+    }
+
+    /// `answers` become ids `0..answers.len()`; any `extra_guesses` that are
+    /// not already answers follow. Duplicates are dropped. `weight` gives
+    /// each answer its prior weight; anything below 1 is raised to 1, since
+    /// a zero-weight candidate could end up the only one left.
+    pub fn with_prior(
+        answers: Vec<Word>,
+        extra_guesses: Vec<Word>,
+        weight: impl Fn(&Word) -> u32,
+    ) -> Result<Context, String> {
         let mut allowed_guesses: Vec<Word> =
             Vec::with_capacity(answers.len() + extra_guesses.len());
         let mut seen = std::collections::HashSet::with_capacity(allowed_guesses.capacity());
@@ -57,14 +80,27 @@ impl Context {
             ));
         }
 
+        let weights: Vec<u32> = allowed_guesses[..num_answers]
+            .iter()
+            .map(|w| weight(w).max(1))
+            .collect();
+        let total_weight: u64 = weights.iter().map(|&w| w as u64).sum();
+        if total_weight > MAX_TOTAL_WEIGHT {
+            return Err(format!(
+                "total prior weight {total_weight} exceeds MAX_TOTAL_WEIGHT; lower prior::SCALE"
+            ));
+        }
+
         let table = build_table(&allowed_guesses, num_answers);
-        let math = MathTables::new(num_answers);
+        let math = MathTables::new(total_weight as usize);
         let answers = (0..num_answers as u16).map(WordId).collect();
 
         Ok(Context {
             allowed_guesses,
             answers,
             table,
+            weights,
+            total_weight,
             math,
         })
     }
@@ -73,10 +109,34 @@ impl Context {
         Context::new(parse_list(answers)?, parse_list(extra_guesses)?)
     }
 
-    /// The official lists compiled into the binary.
-    pub fn bundled() -> Context {
+    /// The official curated answer list as the candidates, uniform prior.
+    /// The solver knows exactly which 2,315 words can be the answer.
+    pub fn curated() -> Context {
         Context::from_lists(words::BUNDLED_ANSWERS, words::BUNDLED_GUESSES)
             .expect("bundled word lists are valid")
+    }
+
+    /// Every allowed word is a candidate, weighted by how common it is.
+    /// The solver does not get the curated list — the honest setting.
+    /// Answer ids `0..2315` are the same words as in [`Context::curated`].
+    pub fn open() -> Context {
+        let (all, _) = Context::open_lists();
+        let counts = parse_frequencies(words::BUNDLED_FREQUENCIES).expect("bundled frequencies");
+        let weights = prior::rank_sigmoid(&all, &counts);
+        Context::with_prior(all, Vec::new(), |w| weights[w]).expect("bundled word lists are valid")
+    }
+
+    /// Every allowed word is a candidate, all equally likely. The baseline
+    /// that shows what the prior buys.
+    pub fn open_uniform() -> Context {
+        let (all, _) = Context::open_lists();
+        Context::new(all, Vec::new()).expect("bundled word lists are valid")
+    }
+
+    fn open_lists() -> (Vec<Word>, Vec<Word>) {
+        let mut all = parse_list(words::BUNDLED_ANSWERS).expect("bundled answers");
+        all.extend(parse_list(words::BUNDLED_GUESSES).expect("bundled guesses"));
+        (all, Vec::new())
     }
 
     #[inline]
@@ -100,6 +160,30 @@ impl Context {
         id.index() < self.answers.len()
     }
 
+    /// Prior weight of an answer. Only meaningful for `id < num_answers`.
+    #[inline]
+    pub fn weight(&self, id: WordId) -> u32 {
+        debug_assert!(self.is_answer(id));
+        self.weights[id.index()]
+    }
+
+    /// Total prior weight of a list of answers.
+    pub fn mass(&self, answers: &[WordId]) -> u64 {
+        answers.iter().map(|&a| self.weight(a) as u64).sum()
+    }
+
+    /// The heaviest candidate; ties go to the lower id.
+    pub fn most_likely(&self, candidates: &CandidateSet) -> Option<WordId> {
+        let mut best: Option<(u32, WordId)> = None;
+        for id in candidates {
+            let w = self.weight(id);
+            if best.is_none_or(|(bw, _)| w > bw) {
+                best = Some((w, id));
+            }
+        }
+        best.map(|(_, id)| id)
+    }
+
     pub fn word(&self, id: WordId) -> &Word {
         &self.allowed_guesses[id.index()]
     }
@@ -118,7 +202,7 @@ impl Context {
 }
 
 /// One row per guess, computed in parallel. ~30M `Pattern::score` calls for
-/// the official lists; tens of milliseconds in release.
+/// the curated lists (tens of milliseconds in release), ~170M for open.
 fn build_table(guesses: &[Word], num_answers: usize) -> Vec<Pattern> {
     let answers = &guesses[..num_answers];
     let mut table = vec![Pattern(0); guesses.len() * num_answers];
@@ -136,13 +220,13 @@ fn build_table(guesses: &[Word], num_answers: usize) -> Vec<Pattern> {
 /// Lookup tables so the entropy inner loop never calls `log2`.
 pub struct MathTables {
     /// `x_log2_x[x] = x · log2(x)`, with `0 · log2(0) = 0`. Indexed by bucket
-    /// size, so it needs `num_answers + 1` entries.
+    /// weight, so it needs `total_weight + 1` entries.
     x_log2_x: Vec<f64>,
 }
 
 impl MathTables {
-    pub fn new(max_count: usize) -> MathTables {
-        let x_log2_x = (0..=max_count)
+    pub fn new(max_weight: usize) -> MathTables {
+        let x_log2_x = (0..=max_weight)
             .map(|x| {
                 if x == 0 {
                     0.0
@@ -183,6 +267,8 @@ mod tests {
         assert!(!ctx.is_answer(WordId(2)));
         assert_eq!(ctx.find(b"soare"), Some(WordId(2)));
         assert_eq!(ctx.find(b"zzzzz"), None);
+        assert_eq!(ctx.weights, vec![1, 1]);
+        assert_eq!(ctx.total_weight, 2);
     }
 
     #[test]
@@ -207,6 +293,30 @@ mod tests {
     }
 
     #[test]
+    fn prior_weights_floor_at_one_and_pick_the_heaviest() {
+        let ctx = Context::with_prior(
+            words(&["crane", "shale", "stone"]),
+            words(&["soare"]),
+            |w| match w {
+                b"shale" => 5,
+                b"stone" => 0,
+                _ => 2,
+            },
+        )
+        .unwrap();
+        assert_eq!(ctx.weights, vec![2, 5, 1]);
+        assert_eq!(ctx.total_weight, 8);
+        assert_eq!(ctx.mass(&[WordId(0), WordId(2)]), 3);
+        let all = CandidateSet::all(3);
+        assert_eq!(ctx.most_likely(&all), Some(WordId(1)));
+        let mut two = CandidateSet::empty();
+        two.insert(WordId(0));
+        two.insert(WordId(2));
+        assert_eq!(ctx.most_likely(&two), Some(WordId(0)));
+        assert_eq!(ctx.most_likely(&CandidateSet::empty()), None);
+    }
+
+    #[test]
     fn rejects_empty_and_oversized() {
         assert!(Context::new(vec![], vec![]).is_err());
         // MAX_ANSWERS + 1 distinct words: base-26 encode the index.
@@ -222,6 +332,8 @@ mod tests {
             })
             .collect();
         assert!(Context::new(too_many, vec![]).is_err());
+        let heavy = Context::with_prior(words(&["crane"]), vec![], |_| u32::MAX);
+        assert!(heavy.is_err());
     }
 
     #[test]

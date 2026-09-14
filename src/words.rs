@@ -9,6 +9,7 @@ use crate::types::{WORD_LEN, Word};
 
 pub const BUNDLED_ANSWERS: &str = include_str!("../data/answers.txt");
 pub const BUNDLED_GUESSES: &str = include_str!("../data/guesses.txt");
+pub const BUNDLED_FREQUENCIES: &str = include_str!("../data/frequencies.txt");
 
 pub fn parse_word(s: &str) -> Result<Word, String> {
     let s = s.trim();
@@ -43,6 +44,25 @@ pub fn parse_list(text: &str) -> Result<Vec<Word>, String> {
         .collect()
 }
 
+/// Parse `word<TAB>count` lines (blanks and `#` comments skipped).
+pub fn parse_frequencies(text: &str) -> Result<Vec<(Word, u64)>, String> {
+    text.lines()
+        .enumerate()
+        .map(|(i, l)| (i + 1, l.trim()))
+        .filter(|(_, l)| !l.is_empty() && !l.starts_with('#'))
+        .map(|(n, l)| {
+            let (w, c) = l
+                .split_once(['\t', ' '])
+                .ok_or_else(|| format!("line {n}: expected `word count`"))?;
+            let count = c
+                .trim()
+                .parse()
+                .map_err(|_| format!("line {n}: bad count {c:?}"))?;
+            Ok((parse_word(w).map_err(|e| format!("line {n}: {e}"))?, count))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,5 +91,19 @@ mod tests {
         assert_eq!(guesses.len(), 10657);
         assert!(answers.contains(b"crane"));
         assert!(guesses.contains(b"soare"));
+        let freq = parse_frequencies(BUNDLED_FREQUENCIES).unwrap();
+        assert_eq!(freq.len(), 8092);
+        assert_eq!(freq[0], (*b"about", 1_226_734_006));
+    }
+
+    #[test]
+    fn parse_frequencies_validates() {
+        assert_eq!(
+            parse_frequencies("# c\ncrane\t10\nshale 5\n").unwrap(),
+            vec![(*b"crane", 10), (*b"shale", 5)]
+        );
+        assert!(parse_frequencies("crane\n").is_err());
+        assert!(parse_frequencies("crane\tten\n").is_err());
+        assert!(parse_frequencies("cranes\t1\n").is_err());
     }
 }

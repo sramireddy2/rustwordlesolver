@@ -21,9 +21,9 @@ impl Strategy for Hybrid {
 
     fn best_guess(&self, ctx: &Context, candidates: &CandidateSet) -> WordId {
         let cands = candidate_list(candidates);
-        let n = cands.len();
+        let mass = ctx.mass(&cands);
         pick_best(ctx, |g| {
-            let (bits, worst) = entropy_and_worst(&histogram(ctx, g, &cands), n, &ctx.math);
+            let (bits, worst) = entropy_and_worst(&histogram(ctx, g, &cands), mass, &ctx.math);
             (bits, Reverse(worst), candidates.contains(g))
         })
     }

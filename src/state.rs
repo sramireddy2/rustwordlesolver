@@ -3,14 +3,15 @@
 use crate::table::Context;
 use crate::types::{Pattern, WordId};
 
-/// `u64` words in the bitset. 37 × 64 = 2,368 bits covers the 2,315 official
-/// answers with a little slack. Raise it if you load a bigger answer list;
-/// `Context::new` checks and refuses rather than silently truncating.
-pub const BITSET_WORDS: usize = 37;
+/// `u64` words in the bitset. 203 × 64 = 12,992 bits covers all 12,972
+/// allowed words, so every word can be a candidate (open mode). Raise it
+/// for a bigger list; `Context::new` checks and refuses rather than
+/// silently truncating.
+pub const BITSET_WORDS: usize = 203;
 pub const MAX_ANSWERS: usize = BITSET_WORDS * 64;
 
 /// A fixed bitset over the answer list: bit `i` set means `WordId(i)` is
-/// still consistent with everything observed. 296 bytes, `Copy`, no heap —
+/// still consistent with everything observed. 1.6 KB, `Copy`, no heap —
 /// cloning one for a lookahead branch is a memcpy.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct CandidateSet {
