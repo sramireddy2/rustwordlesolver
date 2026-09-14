@@ -12,6 +12,7 @@
 
 pub mod entropy;
 pub mod hybrid;
+pub mod lookahead;
 pub mod minimax;
 
 use std::cmp::Ordering;
@@ -37,11 +38,17 @@ pub fn all() -> Vec<Box<dyn Strategy>> {
         Box::new(entropy::Entropy),
         Box::new(minimax::Minimax),
         Box::new(hybrid::Hybrid),
+        Box::new(lookahead::Lookahead::default()),
     ]
 }
 
 /// Look a strategy up by its [`Strategy::name`], for CLI flags.
+/// `lookahead:N` sets the exact-search threshold, for sweeping it.
 pub fn by_name(name: &str) -> Option<Box<dyn Strategy>> {
+    if let Some(n) = name.strip_prefix("lookahead:") {
+        let threshold = n.parse().ok()?;
+        return Some(Box::new(lookahead::Lookahead { threshold }));
+    }
     all().into_iter().find(|s| s.name() == name)
 }
 

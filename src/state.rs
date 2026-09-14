@@ -12,7 +12,7 @@ pub const MAX_ANSWERS: usize = BITSET_WORDS * 64;
 /// A fixed bitset over the answer list: bit `i` set means `WordId(i)` is
 /// still consistent with everything observed. 296 bytes, `Copy`, no heap —
 /// cloning one for a lookahead branch is a memcpy.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct CandidateSet {
     bits: [u64; BITSET_WORDS],
     count: usize,
