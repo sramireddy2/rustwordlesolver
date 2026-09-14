@@ -1,0 +1,11 @@
+[package]
+name = "wordlesolver"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rayon = "1"
+
+# The pattern table is 30M scoring calls; keep test runs snappy.
+[profile.test]
+opt-level = 2
